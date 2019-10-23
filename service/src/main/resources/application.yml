@@ -1,0 +1,6 @@
+# http server port for Spring
+server.port: 8081
+
+log-service:
+  # the location on the local file system where the log files will be written to
+  filePath: ./output-files/
