@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 public class LogInputController {
 
-	LogAppender logAppender;
+	private final LogAppender logAppender;
 
 	/**
 	 * Injection constructor

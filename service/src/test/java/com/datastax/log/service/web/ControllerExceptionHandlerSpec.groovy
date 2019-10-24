@@ -15,7 +15,7 @@ class ControllerExceptionHandlerSpec extends Specification {
 
     def "test that Exception generates custom response Dto"() {
         given:
-			Exception ex = new RuntimeException("foobar");
+			Exception ex = new RuntimeException("foobar")
         when:
 			ServerResponseDto dto = handler.handleGenericException(ex)
         then:

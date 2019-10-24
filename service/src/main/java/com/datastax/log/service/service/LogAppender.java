@@ -19,7 +19,7 @@ import java.util.List;
 public class LogAppender {
     private static final Logger logger = LoggerFactory.getLogger(LogAppender.class);
 
-    File filePath;
+    private final File filePath;
 
 	/**
 	 * Injection constructor
