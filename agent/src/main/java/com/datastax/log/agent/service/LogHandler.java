@@ -5,36 +5,25 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Class to collect and upload log file lines that are tailed by this agent.
- * It contains two lists:
- *    collectionList - gathers lines as they are read in asynchronously from the log file
- *    uploadList - the batch of lines currently in the process of being uploaded
- * 
- * It includes a worker thread to periodically attempt uploading log data to server.
+ * Worker thread to periodically determine whether file lines need to be uploaded.
  * 
  * @author cingham
  */
 @Service
 public class LogHandler implements Runnable {
-	
-	List<String> collectionList = new ArrayList<>();
-	List<String> uploadList = new ArrayList<>();
 
-	// this lock ensures the actions of adding new line elements to the list
-	// and manipulating lists just before upload do not interfere with each other
-	ReentrantLock collectionListLock = new ReentrantLock();
-	
-	LogUploader uploader;
-	long delayBetweenUploads;
+	private final List<LogCollector> logCollectors = new ArrayList<>();
+
+	private final LogUploader uploader;
+	private final long delayBetweenUploads;
 
 	/**
 	 * Injection constructor
 	 *
 	 * @param uploader class that handles uploading collected log lines to service host
-	 * @param config
+	 * @param config app config options
 	 */
 	protected LogHandler(LogUploader uploader, Config config) {
 		this.uploader = uploader;
@@ -42,19 +31,13 @@ public class LogHandler implements Runnable {
 	}
 
 	/**
-	 * Called by the LogCollector as new lines are read in from the file
-	 *
-	 * @param line
+	 * Add a LogCollector, each of which represents a particular file and it's collected log lines
+	 * @param logCollector
 	 */
-	public void collectLine(String line) {
-		collectionListLock.lock();	// temporarily block any upload list manipulation
-	    try {
-	    	collectionList.add(line);
-	    } finally {
-	    	collectionListLock.unlock();
-	    }
+	public void addLogCollector(LogCollector logCollector) {
+		this.logCollectors.add(logCollector);
 	}
-	
+
 	/**
 	 * Worker thread which periodically attempts to upload current batch of lines
 	 */
@@ -62,70 +45,48 @@ public class LogHandler implements Runnable {
 		try {
 			while (!Thread.interrupted()) {
 				Thread.sleep(delayBetweenUploads);
-				processUpload();
+				processLogCollectors();
 			}
 		} catch(InterruptedException ie) {
 			// interrupted during sleep(), just exit thread
 		}
+		shutdown();
 	}
-	
-	private void processUpload() {
-		if (collectionList.size() == 0) {
-			// no new lines added, nothing to do
-			return;
+
+	/**
+	 * Check each file we are watching and process upload as necessary
+	 */
+	private void processLogCollectors() {
+		for (LogCollector logCollector : logCollectors) {
+			processUpload(logCollector);
+		}
+	}
+
+	/**
+	 * For a given file, upload any new lines that came in
+	 * @param logCollector
+	 */
+	private void processUpload(LogCollector logCollector) {
+		if (!logCollector.hasLinesToUpload()) {
+			return;		// nothing to do
 		}
 
-		// ensure uploadList contains the latest batch of lines,
-		// (collectionList becomes uploadList, empty uploadList becomes new collectionList)
-		lockAndSwapLists();
+		// let the collector prepare its internal lists and give us the lines ready to upload
+		List<String> lines = logCollector.beforeUpload();
 
 		// do the upload
-		boolean success = uploader.uploadToServer(uploadList);
-		
-		if (success) {
-			uploadList.clear();
-		} else {
-			// problem during upload:
-			// 1) concatenate any new lines that just came in onto upload list thus keeping the ordering
-			// 2) uploadList then becomes collectionList to continue collecting new lines as usual
-			// 3) later we'll try again during the next upload cycle (in a few seconds)
-			lockAndConcatenateLists();
+		boolean success = uploader.uploadToServer(logCollector.getFile(), lines);
+
+		// let the collector know the status so it can update its lists accordingly
+		logCollector.afterUpload(success);
+	}
+
+	/**
+	 * Cleanup child thread resources (each LogCollector) on app shutdown
+	 */
+	private void shutdown() {
+		for (LogCollector logCollector : logCollectors) {
+			logCollector.shutdown();
 		}
-	}
-
-	/**
-	 * Swap collectionList and uploadList, while locking to prevent contention issues
-	 */
-	private void lockAndSwapLists() {
-		collectionListLock.lock();		// temporarily block new lines from being added
-	    try {
-	    	doListSwap();
-	    } finally {
-	    	collectionListLock.unlock();
-	    }		
-	}
-
-	/**
-	 * Concatenate any new lines that just came in onto upload list thus keeping the ordering,
-	 * uploadList then becomes collectionList to continue collecting new lines as usual
-	 */
-	private void lockAndConcatenateLists() {
-		collectionListLock.lock();		// temporarily block new lines from being added
-	    try {
-	    	// add any new lines to uploadList, keeping the ordering
-	    	uploadList.addAll(collectionList);
-	    	collectionList.clear();
-
-	    	// restore the uploadList back to collectionList
-	    	doListSwap();
-	    } finally {
-	    	collectionListLock.unlock();
-	    }		
-	}
-	
-	private void doListSwap() {
-    	List<String> temp = uploadList;
-    	uploadList = collectionList;
-    	collectionList = temp;
 	}
 }

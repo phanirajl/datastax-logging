@@ -4,10 +4,10 @@ spring:
   main:
     web-application-type: NONE
 
-agent:
+log-agent:
   # client id sent to service host to distinguish which client the logs come from	
-  clientId: client-1
+  clientId: client1
   # url of the service host
-  hostUrl: foobar #https://localhost:8081/datastax-log/service
+  hostUrl: http://localhost:8081/log-aggregator/
   # delay (in seconds) between upload attempts to service host
   delayBetweenUploads: 5

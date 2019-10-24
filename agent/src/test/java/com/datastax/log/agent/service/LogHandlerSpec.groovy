@@ -9,63 +9,69 @@ class LogHandlerSpec extends Specification {
     @Subject
     LogHandler logHandler
     LogUploader logUploader
+	LogCollector collector
     Config config
+	List<String> testLines
 
     def "setup"() {
+		testLines = Arrays.asList("test1", "test2")
         logUploader = Mock()
         config = Mock()
+		collector = Mock()
         logHandler = new LogHandler(logUploader, config)
+		logHandler.addLogCollector(collector)
     }
 
-    def "test added lines are uploaded correctly"() {
-        given:
-            String line1 = "test-1"
-            String line2 = "test-2"
-            logHandler.collectLine(line1)
-            logHandler.collectLine(line2)
-        when:
-            logHandler.processUpload()
-        then:
-            1 * logUploader.uploadToServer(*_) >> { arguments ->
-                final List<String> lineList = arguments[0]
-                assert lineList == [new String(line1), new String(line2)]
-            }
-    }
+	def "test upload is not called when no lines exist"() {
+		given:
+			collector.hasLinesToUpload() >> false
+			collector.beforeUpload() >> testLines
+		when:
+			logHandler.processLogCollectors()
+		then:
+			1 * collector.hasLinesToUpload()
+			0 * collector.beforeUpload()
+			0 * logUploader.uploadToServer(*_)
+	}
 
-    def "test upload is not called when no lines added"() {
-        given:
-        when:
-            logHandler.processUpload()
-        then:
-            0 * logUploader.uploadToServer(*_)
-    }
+	def "test added lines are uploaded correctly"() {
+		given:
+			collector.hasLinesToUpload() >> true
+			collector.beforeUpload() >> testLines
+			logUploader.uploadToServer(_,_) >> true
+		when:
+			logHandler.processLogCollectors()
+		then:
+			1 * logUploader.uploadToServer(_,_) >> { arguments ->
+				final List<String> lineList = arguments[1]
+				assert lineList == [new String("test1"), new String("test2")]
+			}
+	}
 
-    def "test added lines are removed after upload success"() {
-        given:
-            String line1 = "test-1"
-            String line2 = "test-2"
-            logHandler.collectLine(line1)
-            logHandler.collectLine(line2)
-            logUploader.uploadToServer(_) >> true
-        when:
-            logHandler.processUpload()
-        then:
-            assert logHandler.collectionList.size() == 0
-            assert logHandler.uploadList.size() == 0
-    }
+	def "test successful upload notifies collector of status"() {
+		given:
+			collector.hasLinesToUpload() >> true
+			collector.beforeUpload() >> testLines
+			logUploader.uploadToServer(_,_) >> true
+		when:
+			logHandler.processLogCollectors()
+		then:
+			1 * collector.afterUpload(_) >> { args ->
+				assert args[0] == true
+			}
+	}
 
-    def "test added lines are still in place after upload error"() {
-        given:
-            String line1 = "test-1"
-            String line2 = "test-2"
-            logHandler.collectLine(line1)
-            logHandler.collectLine(line2)
-            logUploader.uploadToServer(_) >> false
-        when:
-            logHandler.processUpload()
-        then:
-            assert logHandler.collectionList.size() == 2
-            assert logHandler.uploadList.size() == 0
-    }
+	def "test failed upload notifies collector of status"() {
+		given:
+			collector.hasLinesToUpload() >> true
+			collector.beforeUpload() >> testLines
+			logUploader.uploadToServer(_,_) >> false
+		when:
+			logHandler.processLogCollectors()
+		then:
+			1 * collector.afterUpload(_) >> { args ->
+				assert args[0] == false
+			}
+	}
 }
 

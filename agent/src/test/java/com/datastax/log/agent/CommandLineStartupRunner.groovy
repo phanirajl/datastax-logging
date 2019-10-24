@@ -1,8 +1,5 @@
 package com.datastax.log.agent
 
-import com.datastax.log.agent.config.Config
-import com.datastax.log.agent.service.LogHandler
-import com.datastax.log.agent.service.LogUploader
 import spock.lang.Specification
 import spock.lang.Subject
 
@@ -34,8 +31,16 @@ class CommandLineStartupRunnerSpec extends Specification {
             // Testing the existence of a known file is difficult because it depends on OS, environment, etc.
             // (Note - this is not the same as the application classpath).
             // We'll simply check for the root directory of the current file system.
-            File inputFile = commandLineStartupRunner.checkForFileParameter("/")
+            List<File> inputFiles = commandLineStartupRunner.checkForFileParameter("/")
         then:
-            inputFile.exists()
+			inputFiles.size() == 1
+            inputFiles.get(0).exists()
     }
+
+	def "test checkForFileParameter() for multiple files created"() {
+		when:
+			List<File> inputFiles = commandLineStartupRunner.checkForFileParameter("/", "/")
+		then:
+			inputFiles.size() == 2
+	}
 }

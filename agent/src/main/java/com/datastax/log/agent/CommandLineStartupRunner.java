@@ -2,35 +2,29 @@ package com.datastax.log.agent;
 
 import com.datastax.log.agent.service.LogCollector;
 import com.datastax.log.agent.service.LogHandler;
-import org.apache.commons.io.input.Tailer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PreDestroy;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * SpringBoot provides a CommandLineRunner hook to startup application resources.
- * We'll use it to read the input log filename from the command line,
+ * We'll use it to read the input log filename(s) from the command line,
  * and start the worker threads used for log line processing.
  *
  * @author cingham
  */
 @Component
 public class CommandLineStartupRunner implements CommandLineRunner {
-    private static final Logger logger = LoggerFactory.getLogger(CommandLineStartupRunner.class);
+    private final LogHandler logHandler;
+    private Thread logHandlerThread;
 
-    @Autowired
-    LogCollector logCollector;
-
-    @Autowired
-    LogHandler logHandler;
-
-    Tailer tailer;
-    Thread logHandlerThread;
+	CommandLineStartupRunner(LogHandler logHandler) {
+		this.logHandler = logHandler;
+	}
 
 	/**
 	 * Entry point provided by SpringBoot
@@ -39,32 +33,43 @@ public class CommandLineStartupRunner implements CommandLineRunner {
 	 */
 	@Override
     public void run(String...args) throws Exception {
-        File inputFile = checkForFileParameter(args);
+		// get filename(s) from command line
+        List<File> inputFiles = checkForFileParameter(args);
 
-        // start thread to continuously read in log file lines using the apache Tailer interface.  See:
-        // https://commons.apache.org/proper/commons-io/javadocs/api-2.4/org/apache/commons/io/input/Tailer.html
-        tailer = Tailer.create(inputFile, logCollector);
+        // for each file startup the collector thread
+		for (File file : inputFiles) {
+			LogCollector logCollector = new LogCollector(file);
+			logHandler.addLogCollector(logCollector);
+		}
 
         // start thread to periodically upload collected log lines
-        Thread logHandlerThread = new Thread(logHandler);
+		logHandlerThread = new Thread(logHandler);
         logHandlerThread.start();
     }
 
 	/**
-	 * Check that a valid input filename was provided on the command line
-	 * @param args
-	 * @return the File object representing the specified filename
+	 * Check that valid input filename(s) are provided on the command line
+	 * @param args command line args
+	 * @return list of File objects representing the specified filename(s)
 	 */
-	private File checkForFileParameter(String...args) {
-        if (args.length == 0 || args[0] == null || args[0].length() == 0) {
-            throw new RuntimeException("Missing filename argument on command line");
-        }
-        String filename = args[0];
-        File inputFile = new File(filename);
-        if (!inputFile.exists()) {
-            throw new RuntimeException("Cannot find file: " + filename);
-        }
-        return inputFile;
+	private List<File> checkForFileParameter(String...args) {
+		List<File> fileList = new ArrayList<>();
+		int index = 0;
+		while (args.length > index && args[index] != null && args[index].length() != 0) {
+			String filename = args[index];
+			File inputFile = new File(filename);
+			if (!inputFile.exists()) {
+				throw new RuntimeException("Cannot find input file: " + filename);
+			}
+			fileList.add(inputFile);
+			index++;
+		}
+
+		if (fileList.size() == 0) {
+			throw new RuntimeException("Missing filename argument on command line");
+		}
+
+		return fileList;
     }
 
     /**
@@ -72,10 +77,6 @@ public class CommandLineStartupRunner implements CommandLineRunner {
      */
     @PreDestroy
     public void shutdown() {
-        if (tailer != null) {
-            tailer.stop();
-        }
-
         if (logHandlerThread != null) {
             logHandlerThread.interrupt();
         }

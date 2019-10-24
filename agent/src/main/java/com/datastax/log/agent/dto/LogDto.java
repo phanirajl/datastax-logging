@@ -15,6 +15,6 @@ import java.util.List;
 @Getter
 @Setter
 public class LogDto {
-    String clientId;
+    String filename;
     List<String> lines;
 }
